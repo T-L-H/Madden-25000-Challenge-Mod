@@ -317,6 +317,8 @@ export function generateBaseRosterCSV(selectedTeamId?: number): string {
 
       const weightOffset = weight - 160;
 
+      const coreAttributes = Object.keys(createZeroAttributes());
+
       const playerRowMap: Record<string, string> = {
         PFNA: 'Player',
         PLNA: 'Player',
@@ -331,13 +333,17 @@ export function generateBaseRosterCSV(selectedTeamId?: number): string {
         PPOS: String(pos.id),
         PGID: String(globalPlayerIndex),
         POID: String(globalPlayerIndex),
+        PGHE: String(1 + (globalPlayerIndex % 450)), // Unique-ish face IDs (1 to 450)
+        PHSN: String(globalPlayerIndex % 5),          // Helmet styles
+        PHTN: String(globalPlayerIndex % 3),          // Shoe/glove styles
+        PICN: String(globalPlayerIndex),             // Unique player icons
       };
 
       const row: string[] = CSV_HEADERS.map(header => {
         if (playerRowMap[header] !== undefined) {
           return playerRowMap[header];
         }
-        if (header.startsWith('P') && header !== 'PPOS' && header !== 'PROL' && !['PGID', 'POID', 'PLTY', 'PLDT', 'PCPH', 'PCBT', 'PICN', 'PHAN', 'PSTY'].includes(header)) {
+        if (coreAttributes.includes(header)) {
           return String(baseValue);
         }
         return '0';

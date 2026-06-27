@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Player, TeamInfo } from '../types';
 import { TEAMS, POSITIONS, CSV_HEADERS, generateBaseRosterCSV } from '../data';
-import { Download, AlertTriangle, X, FileSpreadsheet, Share2 } from 'lucide-react';
+import { Download, AlertTriangle, X, FileSpreadsheet, Upload, Share2 } from 'lucide-react';
 
 interface ExportPopupProps {
   roster: Player[];
@@ -10,6 +10,9 @@ interface ExportPopupProps {
 
 export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
   const [selectedTeamId, setSelectedTeamId] = useState<number>(5); // Default to Browns (ID 5)
+  const [uploadedBaseCSV, setUploadedBaseCSV] = useState<string[][] | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string>('');
+  const [uploadError, setUploadError] = useState<string>('');
 
   const selectedTeam = TEAMS.find(t => t.id === selectedTeamId) || TEAMS[0];
 
@@ -42,19 +45,102 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
     return parsed;
   };
 
+  React.useEffect(() => {
+    fetch('/baseRoster.csv')
+      .then(res => {
+        if (!res.ok) throw new Error('File not found');
+        return res.text();
+      })
+      .then(text => {
+        const parsed = parseCSVRows(text);
+        if (parsed.length >= 2) {
+          const headerRow = parsed[0];
+          const colIdx: Record<string, number> = {};
+          headerRow.forEach((colName, idx) => {
+            colIdx[colName.replace(/^["']|["']$/g, '').trim().toUpperCase()] = idx;
+          });
+          const required = ['TGID', 'PPOS', 'PFNA', 'PLNA', 'PGID', 'POID'];
+          const missing = required.filter(col => colIdx[col] === undefined);
+          if (missing.length === 0) {
+            setUploadedBaseCSV(parsed);
+            setUploadedFileName('baseRoster.csv (Auto-loaded from workspace)');
+          } else {
+            console.warn('Auto-loaded baseRoster.csv is missing some required columns:', missing);
+          }
+        }
+      })
+      .catch(err => {
+        console.log('No default baseRoster.csv found on server, using synthetic template.', err);
+      });
+  }, []);
+
+  const handleBaseRosterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadError('');
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (!text) {
+          setUploadError('Uploaded file is empty.');
+          return;
+        }
+
+        const parsed = parseCSVRows(text);
+        if (parsed.length < 2) {
+          setUploadError('Invalid CSV structure.');
+          return;
+        }
+
+        // Verify some standard columns
+        const headerRow = parsed[0];
+        const colIndex: Record<string, number> = {};
+        headerRow.forEach((colName, idx) => {
+          colIndex[colName.replace(/^["']|["']$/g, '').trim().toUpperCase()] = idx;
+        });
+
+        const required = ['TGID', 'PPOS', 'PFNA', 'PLNA', 'PGID', 'POID'];
+        const missing = required.filter(col => colIndex[col] === undefined);
+        if (missing.length > 0) {
+          setUploadError(`Missing required Madden columns in CSV: ${missing.join(', ')}`);
+          return;
+        }
+
+        setUploadedBaseCSV(parsed);
+        setUploadedFileName(file.name);
+      } catch (err) {
+        setUploadError('Error parsing base roster CSV. Ensure it is a valid CSV file.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleClearUploadedBase = () => {
+    setUploadedBaseCSV(null);
+    setUploadedFileName('');
+    setUploadError('');
+  };
+
   // Process and download the updated roster CSV
   const handleExport = () => {
-    // 1. Get the baseline CSV text
-    const baseCSVText = generateBaseRosterCSV(selectedTeamId);
+    // 1. Get the baseline CSV rows
+    let parsedRows: string[][] = [];
+    if (uploadedBaseCSV) {
+      // Deep copy to prevent modifying the state
+      parsedRows = uploadedBaseCSV.map(row => [...row]);
+    } else {
+      const baseCSVText = generateBaseRosterCSV(selectedTeamId);
+      parsedRows = parseCSVRows(baseCSVText);
+    }
     
-    // 2. Parse into rows
-    const parsedRows = parseCSVRows(baseCSVText);
     if (parsedRows.length < 2) {
       alert('Error: Base roster CSV is empty or invalid.');
       return;
     }
 
-    // 3. Map headers to column indices
+    // 2. Map headers to column indices
     const headerRow = parsedRows[0];
     const colIndex: Record<string, number> = {};
     headerRow.forEach((colName, index) => {
@@ -70,7 +156,7 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
       return;
     }
 
-    // 4. Group our crafted players by position
+    // 3. Group our crafted players by position
     const craftedByPos: Record<number, Player[]> = {};
     roster.forEach(player => {
       if (!craftedByPos[player.PPOS]) {
@@ -87,6 +173,15 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
     const identityCols = [
       'PFNA', 'PLNA', 'PHGT', 'PWGT', 'PAGE', 'PYRP', 'PJEN', 'PROL', 'POVR', 'PPOS', 'TGID',
       'PGID', 'PJID', 'PLID', 'PTID', 'PUID'
+    ];
+
+    const LIST_A_EDITABLE = [
+      'PFNA', 'PLNA', 'POVR', 'PHGT', 'PWGT', 'PAGE', 'PYRP', 'PJEN', 'PROL',
+      'PSPD', 'PAGI', 'PACC', 'PAWR', 'PSTR', 'PJMP', 'PSTA', 'PTGH', 'PINJ', 'PELU', 'PTHP', 'PTHA', 'PTAS', 'PTAM', 'PTAD', 'PTOR', 'PTUP', 'PPLA', 'PBSK', 'PCAR', 'PBCV', 'PBKT', 'PLSA', 'PLTR', 'PLSM', 'PLJM', 'PCTH', 'PLCI', 'PLSC', 'SRRN', 'PMRR', 'PDRR', 'PLRL', 'PPBK', 'PPBF', 'PPBS', 'PRBK', 'PRBF', 'PRBS', 'PLIB', 'PLBK', 'PLPR', 'PTAK', 'PLHT', 'PBSG', 'PLPU', 'PLPM', 'PFMS', 'PLMC', 'PLZC', 'PLPE', 'PKPR', 'PKAC', 'PKRT'
+    ];
+
+    const LIST_B_PROTECTED = [
+      'PGID', 'POID', 'PGHE', 'PHSN', 'PHTN', 'PICN', 'TGID', 'PPOS'
     ];
 
     const attributeCols: string[] = [];
@@ -107,9 +202,10 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
       if (coreStatsList.includes(header)) {
         attributeCols.push(header);
       } else if (header.startsWith('TR')) {
-        traitCols.push(header);
-      } else if ((header.startsWith('P') || header.startsWith('SR')) && !identityCols.includes(header)) {
-        attributeCols.push(header);
+        const standardTraits = ['TRCL', 'TRHM', 'TRCB', 'TRBH', 'TRSB', 'TRDO', 'TRTA'];
+        if (standardTraits.includes(header)) {
+          traitCols.push(header);
+        }
       }
     });
 
@@ -124,28 +220,47 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
         // Shift out the next custom player we crafted for this position
         const customPlayer = craftedByPos[rowPosId].shift()!;
 
-        // Overwrite identity columns
-        row[colIndex['PFNA']] = customPlayer.PFNA;
-        row[colIndex['PLNA']] = customPlayer.PLNA;
-        row[colIndex['PHGT']] = String(customPlayer.PHGT);
-        row[colIndex['PWGT']] = String(customPlayer.PWGT); // stored offset (Actual - 160)
-        row[colIndex['PAGE']] = String(customPlayer.PAGE);
-        row[colIndex['PYRP']] = String(customPlayer.PYRP);
-        row[colIndex['PROL']] = String(customPlayer.PROL);
-        row[colIndex['POVR']] = String(customPlayer.POVR);
+        // Overwrite identity columns (only if in LIST_A_EDITABLE and NOT in LIST_B_PROTECTED)
+        if (colIndex['PFNA'] !== undefined && LIST_A_EDITABLE.includes('PFNA') && !LIST_B_PROTECTED.includes('PFNA')) {
+          row[colIndex['PFNA']] = customPlayer.PFNA;
+        }
+        if (colIndex['PLNA'] !== undefined && LIST_A_EDITABLE.includes('PLNA') && !LIST_B_PROTECTED.includes('PLNA')) {
+          row[colIndex['PLNA']] = customPlayer.PLNA;
+        }
+        if (colIndex['PHGT'] !== undefined && LIST_A_EDITABLE.includes('PHGT') && !LIST_B_PROTECTED.includes('PHGT')) {
+          row[colIndex['PHGT']] = String(customPlayer.PHGT);
+        }
+        if (colIndex['PWGT'] !== undefined && LIST_A_EDITABLE.includes('PWGT') && !LIST_B_PROTECTED.includes('PWGT')) {
+          row[colIndex['PWGT']] = String(customPlayer.PWGT);
+        }
+        if (colIndex['PAGE'] !== undefined && LIST_A_EDITABLE.includes('PAGE') && !LIST_B_PROTECTED.includes('PAGE')) {
+          row[colIndex['PAGE']] = String(customPlayer.PAGE);
+        }
+        if (colIndex['PYRP'] !== undefined && LIST_A_EDITABLE.includes('PYRP') && !LIST_B_PROTECTED.includes('PYRP')) {
+          row[colIndex['PYRP']] = String(customPlayer.PYRP);
+        }
+        if (colIndex['PJEN'] !== undefined && LIST_A_EDITABLE.includes('PJEN') && !LIST_B_PROTECTED.includes('PJEN')) {
+          row[colIndex['PJEN']] = String(customPlayer.PJEN);
+        }
+        if (colIndex['PROL'] !== undefined && LIST_A_EDITABLE.includes('PROL') && !LIST_B_PROTECTED.includes('PROL')) {
+          row[colIndex['PROL']] = String(customPlayer.PROL);
+        }
+        if (colIndex['POVR'] !== undefined && LIST_A_EDITABLE.includes('POVR') && !LIST_B_PROTECTED.includes('POVR')) {
+          row[colIndex['POVR']] = String(customPlayer.POVR);
+        }
 
-        // Overwrite attributes
+        // Overwrite attributes (only if in LIST_A_EDITABLE and NOT in LIST_B_PROTECTED)
         Object.entries(customPlayer.attributes).forEach(([attrKey, attrVal]) => {
           const uKey = attrKey.toUpperCase();
-          if (colIndex[uKey] !== undefined) {
+          if (colIndex[uKey] !== undefined && LIST_A_EDITABLE.includes(uKey) && !LIST_B_PROTECTED.includes(uKey)) {
             row[colIndex[uKey]] = String(attrVal);
           }
         });
 
-        // Overwrite traits (convert True/False or numeric trait to 1 or 0)
+        // Overwrite traits (convert True/False or numeric trait to 1 or 0, only if NOT in LIST_B_PROTECTED)
         Object.entries(customPlayer.traits).forEach(([traitKey, traitVal]) => {
           const uKey = traitKey.toUpperCase();
-          if (colIndex[uKey] !== undefined) {
+          if (colIndex[uKey] !== undefined && !LIST_B_PROTECTED.includes(uKey)) {
             row[colIndex[uKey]] = traitVal ? '1' : '0';
           }
         });
@@ -154,41 +269,61 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
         replacementLogs.push(`Successfully replaced ${posName}: ${customPlayer.PFNA} ${customPlayer.PLNA} (OVR: ${customPlayer.POVR})`);
         replaceCount++;
       } else {
-        // For ALL remaining rows in the entire 3,162-row dataframe that you did not explicitly overwrite:
         if (rowTeamId === selectedTeamId) {
           // Unreplaced players on the selected team: 50 OVR, age 30
-          if (colIndex['PFNA'] !== undefined) row[colIndex['PFNA']] = 'Player';
-          if (colIndex['PLNA'] !== undefined) row[colIndex['PLNA']] = 'Player';
-          if (colIndex['POVR'] !== undefined) row[colIndex['POVR']] = '50';
-          if (colIndex['PAGE'] !== undefined) row[colIndex['PAGE']] = '30';
-          if (colIndex['PROL'] !== undefined) row[colIndex['PROL']] = '0';
+          if (colIndex['PFNA'] !== undefined && LIST_A_EDITABLE.includes('PFNA') && !LIST_B_PROTECTED.includes('PFNA')) {
+            row[colIndex['PFNA']] = 'Player';
+          }
+          if (colIndex['PLNA'] !== undefined && LIST_A_EDITABLE.includes('PLNA') && !LIST_B_PROTECTED.includes('PLNA')) {
+            row[colIndex['PLNA']] = 'Player';
+          }
+          if (colIndex['POVR'] !== undefined && LIST_A_EDITABLE.includes('POVR') && !LIST_B_PROTECTED.includes('POVR')) {
+            row[colIndex['POVR']] = '50';
+          }
+          if (colIndex['PAGE'] !== undefined && LIST_A_EDITABLE.includes('PAGE') && !LIST_B_PROTECTED.includes('PAGE')) {
+            row[colIndex['PAGE']] = '30';
+          }
           
           attributeCols.forEach(col => {
-            if (colIndex[col] !== undefined) {
+            if (colIndex[col] !== undefined && LIST_A_EDITABLE.includes(col) && !LIST_B_PROTECTED.includes(col)) {
               row[colIndex[col]] = '50';
             }
           });
+
+          // Set all traits to 0 (only if NOT in LIST_B_PROTECTED)
+          traitCols.forEach(col => {
+            if (colIndex[col] !== undefined && !LIST_B_PROTECTED.includes(col)) {
+              row[colIndex[col]] = '0';
+            }
+          });
         } else {
-          // Other teams' players: 80 OVR, age 26
-          if (colIndex['PFNA'] !== undefined) row[colIndex['PFNA']] = 'Player';
-          if (colIndex['PLNA'] !== undefined) row[colIndex['PLNA']] = 'Player';
-          if (colIndex['POVR'] !== undefined) row[colIndex['POVR']] = '80';
-          if (colIndex['PAGE'] !== undefined) row[colIndex['PAGE']] = '26';
-          if (colIndex['PROL'] !== undefined) row[colIndex['PROL']] = '0';
+          // Other teams' players: 80 OVR, age 27, named "Player Player"
+          if (colIndex['PFNA'] !== undefined && LIST_A_EDITABLE.includes('PFNA') && !LIST_B_PROTECTED.includes('PFNA')) {
+            row[colIndex['PFNA']] = 'Player';
+          }
+          if (colIndex['PLNA'] !== undefined && LIST_A_EDITABLE.includes('PLNA') && !LIST_B_PROTECTED.includes('PLNA')) {
+            row[colIndex['PLNA']] = 'Player';
+          }
+          if (colIndex['POVR'] !== undefined && LIST_A_EDITABLE.includes('POVR') && !LIST_B_PROTECTED.includes('POVR')) {
+            row[colIndex['POVR']] = '80';
+          }
+          if (colIndex['PAGE'] !== undefined && LIST_A_EDITABLE.includes('PAGE') && !LIST_B_PROTECTED.includes('PAGE')) {
+            row[colIndex['PAGE']] = '27';
+          }
           
           attributeCols.forEach(col => {
-            if (colIndex[col] !== undefined) {
+            if (colIndex[col] !== undefined && LIST_A_EDITABLE.includes(col) && !LIST_B_PROTECTED.includes(col)) {
               row[colIndex[col]] = '80';
             }
           });
-        }
 
-        // Set all traits to 0
-        traitCols.forEach(col => {
-          if (colIndex[col] !== undefined) {
-            row[colIndex[col]] = '0';
-          }
-        });
+          // Set all traits to 0 (only if NOT in LIST_B_PROTECTED)
+          traitCols.forEach(col => {
+            if (colIndex[col] !== undefined && !LIST_B_PROTECTED.includes(col)) {
+              row[colIndex[col]] = '0';
+            }
+          });
+        }
       }
     }
 
@@ -234,6 +369,9 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
 
     // Alert user with results
     let alertMsg = `Success! Generated customized CSV overwriting ${replaceCount} player(s) on the ${selectedTeam.city} ${selectedTeam.name}.`;
+    if (uploadedBaseCSV) {
+      alertMsg += `\n\nOriginal face models (PGHE), portraits (PICN), gear settings (PHSN, PHTN), and player IDs (PGID, POID) were kept 100% untouched for full compatibility!`;
+    }
     if (unmatchedPositions.length > 0) {
       alertMsg += `\n\nNote: The following drafted players could not be overwritten because the base team did not contain enough depth positions: ${unmatchedPositions.join(', ')}`;
     }
@@ -308,6 +446,8 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
     alert(`Success! Exported your ${roster.length}-player team as a league preset CSV. Share this file with your league manager!`);
   };
 
+
+
   return (
     <div id="export-popup-backdrop" className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
       <div id="export-popup-box" className="bg-[#1a202c] border border-gray-800 rounded-xl w-full max-w-xl shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
@@ -324,7 +464,7 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
             <FileSpreadsheet className="h-5 w-5 text-indigo-400" />
             <div>
               <h2 className="text-lg font-bold text-white tracking-tight">Export Customized Roster</h2>
-              <p className="text-gray-400 text-xs mt-0.5">Choose an NFL franchise to inject your players into.</p>
+              <p className="text-gray-400 text-xs mt-0.5">Insert custom drafted players into a Madden base roster file.</p>
             </div>
           </div>
           <button 
@@ -337,7 +477,7 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
         </div>
 
         {/* Scrollable Content */}
-        <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar flex-1">
+        <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
           
           {/* Step 1: Team selector */}
           <div className="space-y-2">
@@ -370,14 +510,14 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
                 }}
               >
                 <div 
-                  className="h-6 w-6 rounded flex items-center justify-center font-bold text-xs"
+                  className="h-6 w-6 rounded flex items-center justify-center font-bold text-xs shrink-0"
                   style={{ backgroundColor: selectedTeam.colors.primary, color: '#fff' }}
                 >
                   {selectedTeam.name[0]}
                 </div>
-                <div>
-                  <span className="font-bold text-white block">{selectedTeam.city} {selectedTeam.name}</span>
-                  <span className="text-[10px] text-gray-400">Team ID: {selectedTeam.id}</span>
+                <div className="min-w-0">
+                  <span className="font-bold text-white block truncate">{selectedTeam.city} {selectedTeam.name}</span>
+                  <span className="text-[10px] text-gray-400 font-mono">Team ID: {selectedTeam.id}</span>
                 </div>
               </div>
             </div>
@@ -386,11 +526,11 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
           {/* Step 2: Drafted Players Preview */}
           <div className="bg-[#111622] rounded-lg p-4 border border-gray-850 space-y-2.5">
             <h3 className="text-xs font-bold tracking-wider text-indigo-400 uppercase">
-              Drafted Players to Inject ({roster.length} Players)
+              2. Drafted Players to Inject ({roster.length} Players)
             </h3>
             
             {roster.length > 0 ? (
-              <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1 font-mono text-[11px] custom-scrollbar">
+              <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1 font-mono text-[11px] custom-scrollbar">
                 {roster.map(p => {
                   const posCode = POSITIONS.find(pos => pos.id === p.PPOS)?.code || 'N/A';
                   return (
@@ -409,15 +549,15 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
           </div>
 
           {/* Step 3: Core download action */}
-          <div className="pt-2 space-y-3 border-t border-gray-800/60 pt-5">
+          <div className="pt-2 space-y-3 border-t border-gray-800/60">
             <label className="block text-xs font-bold tracking-wider text-indigo-400 uppercase">
-              2. Generate and Export File
+              3. Generate and Export File
             </label>
             <button
               id="btn-download-csv"
               type="button"
               onClick={handleExport}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 px-4 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 cursor-pointer"
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 px-4 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 cursor-pointer transition-colors"
             >
               <Download className="h-5 w-5" />
               Generate & Download Custom Roster CSV
@@ -434,16 +574,15 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
             </button>
 
             <p className="text-center text-[10px] text-gray-500 mt-2 font-mono leading-normal">
-              The first button creates the full 32-team custom roster. The second exports ONLY your customized drafted players as a portable league preset file.
+              Downloads either the complete roster file or a portable team preset file.
             </p>
           </div>
 
         </div>
 
         {/* Footer info warning */}
-        <div className="bg-[#111622] p-4 border-t border-gray-800 text-[10px] font-mono text-gray-400 flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-          <span>IMPORTANT: Madden CSV roster imports require exact column headers and positional integrity (TGID / PPOS codes) to load without crashing.</span>
+        <div className="bg-[#111622] p-3 border-t border-gray-800 text-[10px] font-mono text-gray-400 flex items-center gap-2 justify-center">
+          <span>Base roster injection complete. Ready for Madden import.</span>
         </div>
 
       </div>

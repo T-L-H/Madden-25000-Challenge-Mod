@@ -1,6 +1,8 @@
 {
-  "name": "Madden $25,000 Challenge",
+  "name": "Remix: Madden Roster Builder \u0026 Exporter",
   "description": "A dark, modern Madden franchise roster builder and exporter. Build a 22-man team under budget, customize positions and attributes, and export custom players directly into a Madden base roster CSV.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
