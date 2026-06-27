@@ -3,7 +3,7 @@ import { Player, LiveTicketData, PlayerAttributes, PlayerTraits } from './types'
 import PlayerBuilder from './components/PlayerBuilder';
 import RosterList from './components/RosterList';
 import ExportPopup from './components/ExportPopup';
-import { BadgeAlert, ShieldCheck, Share2, HelpCircle, DollarSign, Award, Trophy, Info, FileSpreadsheet } from 'lucide-react';
+import { BadgeAlert, ShieldCheck, Share2, HelpCircle, DollarSign, Award, Trophy, Info, FileSpreadsheet, Youtube } from 'lucide-react';
 import { POSITIONS, createZeroAttributes, createZeroTraits } from './data';
 import {
   calculateOVR,
@@ -289,26 +289,20 @@ export default function App() {
               </button>
             </div>
 
-            {/* Compliance Badge */}
-            <div className="bg-[#161d2d] border border-gray-800 rounded-lg px-3 py-1.5 text-xs font-mono flex items-center gap-2">
-              {totalRosterCost <= BUDGET_CAP && roster.length <= 22 ? (
-                <>
-                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                  <div>
-                    <span className="text-emerald-400 block font-bold text-[9px] uppercase leading-none">Compliance</span>
-                    <span className="text-gray-300 font-bold">Roster Valid</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <BadgeAlert className="h-4 w-4 text-rose-400" />
-                  <div>
-                    <span className="text-rose-400 block font-bold text-[9px] uppercase leading-none">Compliance</span>
-                    <span className="text-rose-400 font-bold">Cap/Size Violation</span>
-                  </div>
-                </>
-              )}
-            </div>
+            {/* Tutorial Link Button */}
+            <a
+              href="https://www.youtube.com/watch?v=R5d1-LJm4LY"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-[#1c162e] hover:bg-[#291e45] text-rose-400 border border-rose-950/60 hover:border-rose-500/50 rounded-lg px-3 py-1.5 text-xs font-mono flex items-center gap-2 cursor-pointer transition-all shadow-md group"
+              title="Watch Tutorial for Gameplay and Importing into Madden"
+            >
+              <Youtube className="h-4 w-4 text-rose-500 group-hover:scale-110 transition-transform" />
+              <div className="text-left">
+                <span className="text-rose-500 block text-[9px] uppercase font-bold leading-none">Madden Guide</span>
+                <span className="text-gray-200 font-bold">Tutorial for Gameplay & Importing</span>
+              </div>
+            </a>
 
             <button
               onClick={() => setShowGuide(prev => !prev)}
