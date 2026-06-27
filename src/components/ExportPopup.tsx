@@ -14,6 +14,11 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
   const [uploadError, setUploadError] = useState<string>('');
 
+  const [overwriteCustomMode, setOverwriteCustomMode] = useState<boolean>(false);
+  const [uploadedCustomCSV, setUploadedCustomCSV] = useState<string[][] | null>(null);
+  const [uploadedCustomFileName, setUploadedCustomFileName] = useState<string>('');
+  const [customUploadError, setCustomUploadError] = useState<string>('');
+
   const selectedTeam = TEAMS.find(t => t.id === selectedTeamId) || TEAMS[0];
 
   // Helper to parse CSV string into arrays of strings
@@ -123,16 +128,74 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
     setUploadError('');
   };
 
+  const handleCustomRosterUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCustomUploadError('');
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (!text) {
+          setCustomUploadError('Uploaded file is empty.');
+          return;
+        }
+
+        const parsed = parseCSVRows(text);
+        if (parsed.length < 2) {
+          setCustomUploadError('Invalid CSV structure.');
+          return;
+        }
+
+        // Verify standard columns
+        const headerRow = parsed[0];
+        const colIndex: Record<string, number> = {};
+        headerRow.forEach((colName, idx) => {
+          colIndex[colName.replace(/^["']|["']$/g, '').trim().toUpperCase()] = idx;
+        });
+
+        const required = ['TGID', 'PPOS', 'PFNA', 'PLNA', 'PGID', 'POID'];
+        const missing = required.filter(col => colIndex[col] === undefined);
+        if (missing.length > 0) {
+          setCustomUploadError(`Missing required Madden columns in CSV: ${missing.join(', ')}`);
+          return;
+        }
+
+        setUploadedCustomCSV(parsed);
+        setUploadedCustomFileName(file.name);
+      } catch (err) {
+        setCustomUploadError('Error parsing custom roster CSV. Ensure it is a valid CSV file.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleClearUploadedCustom = () => {
+    setUploadedCustomCSV(null);
+    setUploadedCustomFileName('');
+    setCustomUploadError('');
+  };
+
   // Process and download the updated roster CSV
   const handleExport = () => {
     // 1. Get the baseline CSV rows
     let parsedRows: string[][] = [];
-    if (uploadedBaseCSV) {
+    if (overwriteCustomMode) {
+      if (!uploadedCustomCSV) {
+        alert('Please upload your custom roster CSV first, or turn off the "Overwrite a custom CSV file" option.');
+        return;
+      }
       // Deep copy to prevent modifying the state
-      parsedRows = uploadedBaseCSV.map(row => [...row]);
+      parsedRows = uploadedCustomCSV.map(row => [...row]);
     } else {
-      const baseCSVText = generateBaseRosterCSV(selectedTeamId);
-      parsedRows = parseCSVRows(baseCSVText);
+      if (uploadedBaseCSV) {
+        // Deep copy to prevent modifying the state
+        parsedRows = uploadedBaseCSV.map(row => [...row]);
+      } else {
+        const baseCSVText = generateBaseRosterCSV(selectedTeamId);
+        parsedRows = parseCSVRows(baseCSVText);
+      }
     }
     
     if (parsedRows.length < 2) {
@@ -297,32 +360,37 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
             }
           });
         } else {
-          // Other teams' players: 80 OVR, age 27, named "Player Player"
-          if (colIndex['PFNA'] !== undefined && LIST_A_EDITABLE.includes('PFNA') && !LIST_B_PROTECTED.includes('PFNA')) {
-            row[colIndex['PFNA']] = 'Player';
-          }
-          if (colIndex['PLNA'] !== undefined && LIST_A_EDITABLE.includes('PLNA') && !LIST_B_PROTECTED.includes('PLNA')) {
-            row[colIndex['PLNA']] = 'Player';
-          }
-          if (colIndex['POVR'] !== undefined && LIST_A_EDITABLE.includes('POVR') && !LIST_B_PROTECTED.includes('POVR')) {
-            row[colIndex['POVR']] = '80';
-          }
-          if (colIndex['PAGE'] !== undefined && LIST_A_EDITABLE.includes('PAGE') && !LIST_B_PROTECTED.includes('PAGE')) {
-            row[colIndex['PAGE']] = '27';
-          }
-          
-          attributeCols.forEach(col => {
-            if (colIndex[col] !== undefined && LIST_A_EDITABLE.includes(col) && !LIST_B_PROTECTED.includes(col)) {
-              row[colIndex[col]] = '80';
+          // Other teams' players:
+          if (overwriteCustomMode) {
+            // Leave other teams' players completely untouched!
+          } else {
+            // Clear other teams to flat 80 OVR, age 27, named "Player Player"
+            if (colIndex['PFNA'] !== undefined && LIST_A_EDITABLE.includes('PFNA') && !LIST_B_PROTECTED.includes('PFNA')) {
+              row[colIndex['PFNA']] = 'Player';
             }
-          });
+            if (colIndex['PLNA'] !== undefined && LIST_A_EDITABLE.includes('PLNA') && !LIST_B_PROTECTED.includes('PLNA')) {
+              row[colIndex['PLNA']] = 'Player';
+            }
+            if (colIndex['POVR'] !== undefined && LIST_A_EDITABLE.includes('POVR') && !LIST_B_PROTECTED.includes('POVR')) {
+              row[colIndex['POVR']] = '80';
+            }
+            if (colIndex['PAGE'] !== undefined && LIST_A_EDITABLE.includes('PAGE') && !LIST_B_PROTECTED.includes('PAGE')) {
+              row[colIndex['PAGE']] = '27';
+            }
+            
+            attributeCols.forEach(col => {
+              if (colIndex[col] !== undefined && LIST_A_EDITABLE.includes(col) && !LIST_B_PROTECTED.includes(col)) {
+                row[colIndex[col]] = '80';
+              }
+            });
 
-          // Set all traits to 0 (only if NOT in LIST_B_PROTECTED)
-          traitCols.forEach(col => {
-            if (colIndex[col] !== undefined && !LIST_B_PROTECTED.includes(col)) {
-              row[colIndex[col]] = '0';
-            }
-          });
+            // Set all traits to 0 (only if NOT in LIST_B_PROTECTED)
+            traitCols.forEach(col => {
+              if (colIndex[col] !== undefined && !LIST_B_PROTECTED.includes(col)) {
+                row[colIndex[col]] = '0';
+              }
+            });
+          }
         }
       }
     }
@@ -478,6 +546,72 @@ export default function ExportPopup({ roster, onClose }: ExportPopupProps) {
 
         {/* Scrollable Content */}
         <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
+
+          {/* Overwrite Custom CSV Option */}
+          <div className="space-y-3 bg-[#111622] rounded-lg p-4 border border-gray-850">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <label className="text-sm font-bold text-white block">
+                  Overwrite a custom CSV file?
+                </label>
+                <span className="text-[11px] text-gray-400 block mt-0.5">
+                  Upload your own roster to overwrite ONLY your selected team, leaving all other 31 teams completely untouched.
+                </span>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                <input 
+                  type="checkbox" 
+                  checked={overwriteCustomMode}
+                  onChange={(e) => setOverwriteCustomMode(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-700 rounded-full peer peer-focus:ring-2 peer-focus:ring-indigo-500/50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+
+            {overwriteCustomMode && (
+              <div className="border-2 border-dashed border-gray-750 hover:border-indigo-500/50 rounded-lg p-3.5 text-center cursor-pointer transition-colors bg-[#0f1422] relative mt-1">
+                <input
+                  id="custom-roster-uploader"
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCustomRosterUpload}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+                <Upload className="h-6 w-6 text-indigo-400/80 mx-auto mb-1.5" />
+                {uploadedCustomFileName ? (
+                  <div className="space-y-1">
+                    <span className="text-emerald-400 font-bold text-xs block">✓ Custom Loaded: {uploadedCustomFileName}</span>
+                    <span className="text-[10px] text-gray-400 font-mono">
+                      {uploadedCustomCSV ? `${uploadedCustomCSV.length - 1} custom league players loaded` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        handleClearUploadedCustom();
+                      }}
+                      className="text-[10px] text-rose-400 hover:text-rose-300 underline font-mono mt-1 z-10 cursor-pointer"
+                    >
+                      Clear custom file
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <span className="text-gray-300 font-semibold text-xs block">Click or Drag & Drop custom roster CSV</span>
+                    <span className="text-[9px] text-gray-500 block mt-0.5">Will inject drafted players & clear unreplaced teammates to 50s, leaving other teams completely unchanged!</span>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {overwriteCustomMode && customUploadError && (
+              <p className="text-rose-400 text-[11px] font-semibold bg-rose-950/20 border border-rose-900/30 p-2 rounded mt-1.5">
+                {customUploadError}
+              </p>
+            )}
+          </div>
           
           {/* Step 1: Team selector */}
           <div className="space-y-2">
